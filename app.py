@@ -2,15 +2,14 @@ import os
 import re
 import uuid
 import threading
-from flask import Flask, render_template, request, jsonify, send_file, after_this_request
+from flask import Flask, request, jsonify, send_file, after_this_request
 import yt_dlp
 
-app = Flask(__name__)
+app = Flask(__name__, template_folder=os.path.join(os.path.dirname(__file__), 'templates'))
 
 DOWNLOAD_FOLDER = "/tmp/yt_downloads"
 os.makedirs(DOWNLOAD_FOLDER, exist_ok=True)
 
-# Track download progress per job
 jobs = {}
 
 def sanitize_filename(name):
@@ -33,23 +32,21 @@ def download_video(job_id, url, format_choice, quality):
 
     if format_choice == "audio":
         ydl_opts = {
-            "format": "bestaudio/best",
+            "format": "bestaudio[ext=m4a]/bestaudio/best",
             "outtmpl": output_template,
             "progress_hooks": [progress_hook],
-            "postprocessors": [{
-                "key": "FFmpegExtractAudio",
-                "preferredcodec": "mp3",
-                "preferredquality": "192",
-            }],
             "quiet": True,
         }
     else:
-        fmt = f"bestvideo[height<={quality}]+bestaudio/best[height<={quality}]" if quality != "best" else "bestvideo+bestaudio/best"
+        fmt = (
+            f"best[height<={quality}][ext=mp4]/best[height<={quality}]/best[ext=mp4]/best"
+            if quality != "best"
+            else "best[ext=mp4]/best"
+        )
         ydl_opts = {
             "format": fmt,
             "outtmpl": output_template,
             "progress_hooks": [progress_hook],
-            "merge_output_format": "mp4",
             "quiet": True,
         }
 
@@ -58,7 +55,6 @@ def download_video(job_id, url, format_choice, quality):
             info = ydl.extract_info(url, download=True)
             title = sanitize_filename(info.get("title", "video"))
 
-        # Find downloaded file
         for f in os.listdir(DOWNLOAD_FOLDER):
             if f.startswith(job_id):
                 jobs[job_id]["filename"] = f
@@ -73,6 +69,7 @@ def download_video(job_id, url, format_choice, quality):
 
 @app.route("/")
 def index():
+    from flask import render_template
     return render_template("index.html")
 
 
@@ -98,8 +95,8 @@ def get_info():
 def start_download():
     data = request.json
     url = data.get("url", "").strip()
-    format_choice = data.get("format", "video")  # video or audio
-    quality = data.get("quality", "1080")
+    format_choice = data.get("format", "video")
+    quality = data.get("quality", "best")
 
     if not url:
         return jsonify({"error": "URL requerida"}), 400
